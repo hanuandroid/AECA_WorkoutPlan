@@ -12,8 +12,11 @@ import groq
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "openai/gpt-oss-20b"
 REQUEST_TIMEOUT_SECONDS = 30.0
+# A full 7-day plan with per-day tables can run long; too low a cap silently
+# truncates the response before it reaches the closing safety disclaimer.
+MAX_OUTPUT_TOKENS = 4096
 
 _FRIENDLY_AUTH_ERROR = (
     "We couldn't authenticate with the AI service. Please check that the "
@@ -42,8 +45,13 @@ class GroqClientError(Exception):
     """
 
 
-def call_groq(prompt: str, model: str = DEFAULT_MODEL) -> str:
+def call_groq(prompt: str, model: str | None = None) -> str:
     """Send a prompt to Groq and return the raw text response.
+
+    The model defaults to the GROQ_MODEL environment variable if set, then
+    falls back to DEFAULT_MODEL — Groq's catalog of active models changes
+    over time, so the model name should be configurable without a code
+    change.
 
     Raises GroqClientError (with a user-safe message) on any failure —
     missing/invalid API key, network error, timeout, rate limit, or other
@@ -57,12 +65,14 @@ def call_groq(prompt: str, model: str = DEFAULT_MODEL) -> str:
             "variable and try again."
         )
 
+    resolved_model = model or os.environ.get("GROQ_MODEL") or DEFAULT_MODEL
     client = groq.Groq(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS)
 
     try:
         response = client.chat.completions.create(
-            model=model,
+            model=resolved_model,
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=MAX_OUTPUT_TOKENS,
         )
     except groq.AuthenticationError as exc:
         logger.warning("Groq authentication failed: %s", type(exc).__name__)

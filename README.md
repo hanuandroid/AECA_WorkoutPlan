@@ -83,6 +83,13 @@ cp .env.example .env
    ```
 3. Never commit `.env` — it's gitignored. Only `.env.example` (with a placeholder)
    is committed.
+4. Optional: set `GROQ_MODEL` in `.env` to override the default model
+   (`openai/gpt-oss-20b`). Groq's catalog of active models changes over time and
+   varies by account/plan — if plan generation fails with a friendly error, it's
+   most often a 404 "model_not_found" from an outdated model name. Check
+   [console.groq.com/docs/models](https://console.groq.com/docs/models) (or call
+   `client.models.list()`) for a model your account can access, then set
+   `GROQ_MODEL` accordingly — no code change needed.
 
 ## 7. How to Run
 
