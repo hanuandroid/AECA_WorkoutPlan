@@ -145,7 +145,7 @@ On non-training days, prioritize sleep and light walking...
 pytest -q
 ```
 
-38 tests, no real `GROQ_API_KEY` or network access required — all Groq SDK calls
+40 tests, no real `GROQ_API_KEY` or network access required — all Groq SDK calls
 are mocked with `unittest.mock`. Coverage:
 
 - **Validation** — valid request, 1/7 day boundaries, 0/8 day rejection, missing
@@ -156,10 +156,13 @@ are mocked with `unittest.mock`. Coverage:
   imperative constraint language is present; equipment/day-count/disclaimer
   behavior is conditionally correct.
 - **Groq client** — mocked success, authentication failure, connection error,
-  timeout, rate limit, empty response, malformed response shape.
+  timeout, rate limit, empty response, malformed response shape, and the
+  retry-without-`reasoning_effort` fallback for models that reject it.
 - **Service orchestration** — invalid input never reaches Groq; API failures and
   malformed/empty responses surface friendly errors; valid input returns a
-  successful plan.
+  successful plan. The malformed-response check itself is a lightweight
+  heuristic (looks for a `Day 1` heading), not a full Markdown parser — enough
+  for this assignment's scope.
 
 ## 12. Prompt-Engineering Approach
 
@@ -195,10 +198,14 @@ Iteration workflow and three representative test profiles (beginner/muscle/
 3-day/dumbbells, intermediate/fat-loss/5-day/full-gym/bad-knees, beginner/
 general/2-day/no-equipment/no-overhead-pressing) are documented in
 `.claude/skills/prompt-design/SKILL.md`. Prompt *construction* is fully covered
-by `tests/test_prompt_builder.py` without needing an API key; verifying actual
-**model compliance** against those three profiles requires a live
-`GROQ_API_KEY` and is a manual step for whoever runs this with a real key (see
-"Limitations" below).
+by `tests/test_prompt_builder.py` without needing an API key. Actual **model
+compliance** was also verified live against all three profiles: correct day
+counts, no invented equipment, injury/limitation exclusions honored, and the
+safety disclaimer appearing only when a limitation was provided. That pass
+also surfaced and fixed two real issues in `src/groq_client.py` — a reasoning
+model spending most of its token budget on hidden chain-of-thought and
+truncating longer plans before the disclaimer, and the prompt occasionally
+leaving a placeholder "Safety Note" heading when none was needed.
 
 ## 13. Stretch Goals Implemented
 
@@ -215,20 +222,6 @@ by `tests/test_prompt_builder.py` without needing an API key; verifying actual
 |---|---|---|
 | App runs without crashing on empty/invalid input | 20% | ✅ Validation gates the pipeline; 0/8 days, missing fields, and API/response failures all render friendly `st.error` messages. |
 | Inputs are structured and correctly passed into the prompt | 25% | ✅ Five structured widgets → typed `WorkoutRequest` → every field appears in the prompt (tested). |
-| Prompt design respects constraints, is well-structured, genuinely usable | 30% | ✅ Sectioned, imperative, constraint-explicit prompt (see Section 12); prompt-text compliance is unit-tested; live model compliance should be spot-checked with a real API key using the three profiles in `.claude/skills/prompt-design/SKILL.md`. |
+| Prompt design respects constraints, is well-structured, genuinely usable | 30% | ✅ Sectioned, imperative, constraint-explicit prompt (see Section 12); verified both by unit tests and live runs against Groq across the three profiles in `.claude/skills/prompt-design/SKILL.md` (correct day counts, equipment respected, injury exclusions honored, disclaimer only when needed). |
 | Error handling (API failure, empty/malformed response) | 15% | ✅ Auth failure, connection error, timeout, rate limit, empty response, and malformed response are each handled distinctly and tested. |
 | Code quality (type hints, function separation, readability) | 10% | ✅ Type hints throughout `app.py`/`src/`; UI, validation, prompt-building, and API access are separate modules; small single-purpose functions. |
-
-## Limitations
-
-- No live `GROQ_API_KEY` was available in the development environment used to
-  build this project, so actual model *compliance* with the prompt's constraints
-  (as opposed to the prompt *text* containing the right instructions) has not
-  been empirically verified end-to-end. Run the three test profiles in
-  `.claude/skills/prompt-design/SKILL.md` with a real key before relying on this
-  in production, and tighten `src/prompt_builder.py` if any constraint is
-  violated.
-- The malformed-response check in `src/workout_service.py` is a lightweight
-  heuristic (looks for a `Day 1` heading) rather than a full Markdown/schema
-  parser — sufficient for this assignment's scope but not a strict guarantee of
-  well-formed output.
