@@ -107,3 +107,47 @@ def test_call_groq_malformed_response_is_friendly(mock_groq_cls: MagicMock) -> N
 
     with pytest.raises(GroqClientError):
         call_groq("some prompt")
+
+
+@patch.dict("os.environ", {"GROQ_API_KEY": "test-key"})
+@patch("src.groq_client.groq.Groq")
+def test_call_groq_retries_without_reasoning_effort_when_unsupported(
+    mock_groq_cls: MagicMock,
+) -> None:
+    response = httpx.Response(400, request=_FAKE_REQUEST)
+    unsupported_error = groq.BadRequestError(
+        "`reasoning_effort` is not supported with this model",
+        response=response,
+        body=None,
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = [
+        unsupported_error,
+        _fake_response("# Weekly Workout Plan"),
+    ]
+    mock_groq_cls.return_value = mock_client
+
+    result = call_groq("some prompt")
+
+    assert result == "# Weekly Workout Plan"
+    assert mock_client.chat.completions.create.call_count == 2
+    first_call_kwargs = mock_client.chat.completions.create.call_args_list[0].kwargs
+    second_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+    assert "reasoning_effort" in first_call_kwargs
+    assert "reasoning_effort" not in second_call_kwargs
+
+
+@patch.dict("os.environ", {"GROQ_API_KEY": "test-key"})
+@patch("src.groq_client.groq.Groq")
+def test_call_groq_other_bad_request_errors_are_not_retried(
+    mock_groq_cls: MagicMock,
+) -> None:
+    response = httpx.Response(400, request=_FAKE_REQUEST)
+    error = groq.BadRequestError("some other validation error", response=response, body=None)
+    mock_client = _mock_client_with_effect(error)
+    mock_groq_cls.return_value = mock_client
+
+    with pytest.raises(GroqClientError):
+        call_groq("some prompt")
+
+    assert mock_client.chat.completions.create.call_count == 1

@@ -167,14 +167,14 @@ def _build_design_requirements_section(request: WorkoutRequest) -> str:
 
 
 def _build_output_format_section(request: WorkoutRequest) -> str:
-    return (
+    header = (
         "OUTPUT FORMAT\n"
         "Return the plan in Markdown using EXACTLY this structure:\n\n"
         "# Weekly Workout Plan\n\n"
         "## Weekly Overview\n"
         "(1-2 sentences summarizing the week's structure and how it fits the "
         "user's goal)\n\n"
-        f"## Day 1 - <Focus>\n"
+        "## Day 1 - <Focus>\n"
         "Warm-up: <brief warm-up guidance>\n\n"
         "| Exercise | Sets | Reps | Rest |\n"
         "|---|---|---|---|\n"
@@ -183,10 +183,23 @@ def _build_output_format_section(request: WorkoutRequest) -> str:
         f"{request.days_per_week} training day(s) total)\n\n"
         "## Rest & Recovery\n"
         "(guidance for the non-training days of the week)\n\n"
-        "## Safety Note\n"
-        "(include this section ONLY if the user reported a limitation; omit it "
-        "entirely otherwise)\n\n"
-        "Do not include any text outside this structure. Do not return a single "
+    )
+    if request.has_limitations:
+        footer = (
+            "## Safety Note\n"
+            "(the concise disclaimer described in SAFETY REQUIREMENTS below — "
+            "this section IS required because the user reported a limitation)\n\n"
+        )
+    else:
+        footer = (
+            "The plan ends after the '## Rest & Recovery' section. Do NOT add a "
+            "'## Safety Note' heading or any other heading after it — the user "
+            "reported no limitations, so there is nothing to disclaim.\n\n"
+        )
+    return (
+        header
+        + footer
+        + "Do not include any text outside this structure. Do not return a single "
         "wall-of-text paragraph."
     )
 

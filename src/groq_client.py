@@ -9,14 +9,22 @@ import logging
 import os
 
 import groq
+from groq.types.chat import ChatCompletion
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 REQUEST_TIMEOUT_SECONDS = 30.0
-# A full 7-day plan with per-day tables can run long; too low a cap silently
-# truncates the response before it reaches the closing safety disclaimer.
+# Sized to stay well under this account's free-tier tokens-per-minute limit
+# alongside a typical prompt (~1000 tokens), while giving even a 7-day plan
+# comfortable room to finish without truncating.
 MAX_OUTPUT_TOKENS = 4096
+# "low" keeps reasoning-capable models (e.g. openai/gpt-oss-20b) from
+# spending most of the token budget on hidden chain-of-thought — without it,
+# longer plans were getting truncated before reaching the closing safety
+# disclaimer. Not every model supports this parameter, so call_groq falls
+# back to omitting it if the model rejects it.
+REASONING_EFFORT = "low"
 
 _FRIENDLY_AUTH_ERROR = (
     "We couldn't authenticate with the AI service. Please check that the "
@@ -69,37 +77,66 @@ def call_groq(prompt: str, model: str | None = None) -> str:
     client = groq.Groq(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS)
 
     try:
-        response = client.chat.completions.create(
-            model=resolved_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=MAX_OUTPUT_TOKENS,
+        response = _create_completion(
+            client, resolved_model, prompt, with_reasoning_effort=True
         )
-    except groq.AuthenticationError as exc:
-        logger.warning("Groq authentication failed: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_AUTH_ERROR) from exc
-    except groq.RateLimitError as exc:
-        logger.warning("Groq rate limit hit: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_RATE_LIMIT_ERROR) from exc
-    except groq.APITimeoutError as exc:
-        logger.warning("Groq request timed out: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_TIMEOUT_ERROR) from exc
-    except groq.APIConnectionError as exc:
-        logger.warning("Groq connection error: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_CONNECTION_ERROR) from exc
-    except groq.APIStatusError as exc:
-        logger.warning("Groq API returned an error status: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_GENERIC_ERROR) from exc
+    except groq.BadRequestError as exc:
+        if not _rejects_reasoning_effort(exc):
+            _raise_friendly_error(exc)
+        logger.info(
+            "Model %s does not support reasoning_effort; retrying without it",
+            resolved_model,
+        )
+        try:
+            response = _create_completion(
+                client, resolved_model, prompt, with_reasoning_effort=False
+            )
+        except groq.GroqError as retry_exc:
+            _raise_friendly_error(retry_exc)
     except groq.GroqError as exc:
-        logger.warning("Groq SDK error: %s", type(exc).__name__)
-        raise GroqClientError(_FRIENDLY_GENERIC_ERROR) from exc
+        _raise_friendly_error(exc)
 
     return _extract_content(response)
 
 
-def _extract_content(response: object) -> str:
+def _create_completion(
+    client: groq.Groq, model: str, prompt: str, with_reasoning_effort: bool
+) -> ChatCompletion:
+    kwargs: dict[str, object] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": MAX_OUTPUT_TOKENS,
+    }
+    if with_reasoning_effort:
+        kwargs["reasoning_effort"] = REASONING_EFFORT
+    return client.chat.completions.create(**kwargs)
+
+
+def _rejects_reasoning_effort(exc: groq.BadRequestError) -> bool:
+    return "reasoning_effort" in str(exc)
+
+
+def _raise_friendly_error(exc: groq.GroqError) -> None:
+    """Log the real exception and raise the matching friendly GroqClientError."""
+    if isinstance(exc, groq.AuthenticationError):
+        logger.warning("Groq authentication failed: %s", type(exc).__name__)
+        raise GroqClientError(_FRIENDLY_AUTH_ERROR) from exc
+    if isinstance(exc, groq.RateLimitError):
+        logger.warning("Groq rate limit hit: %s", type(exc).__name__)
+        raise GroqClientError(_FRIENDLY_RATE_LIMIT_ERROR) from exc
+    if isinstance(exc, groq.APITimeoutError):
+        logger.warning("Groq request timed out: %s", type(exc).__name__)
+        raise GroqClientError(_FRIENDLY_TIMEOUT_ERROR) from exc
+    if isinstance(exc, groq.APIConnectionError):
+        logger.warning("Groq connection error: %s", type(exc).__name__)
+        raise GroqClientError(_FRIENDLY_CONNECTION_ERROR) from exc
+    logger.warning("Groq API error: %s", type(exc).__name__)
+    raise GroqClientError(_FRIENDLY_GENERIC_ERROR) from exc
+
+
+def _extract_content(response: ChatCompletion) -> str:
     try:
-        choices = response.choices  # type: ignore[attr-defined]
-        content = choices[0].message.content
+        content = response.choices[0].message.content
     except (AttributeError, IndexError, TypeError) as exc:
         logger.warning("Malformed Groq response shape: %s", type(exc).__name__)
         raise GroqClientError(_FRIENDLY_GENERIC_ERROR) from exc
