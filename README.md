@@ -71,7 +71,13 @@ pip install -r requirements.txt
 Copy the example env file and fill in your key:
 
 ```bash
+# macOS/Linux/Git Bash
 cp .env.example .env
+```
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
 ```
 
 ## 6. Groq API Key Configuration
@@ -90,6 +96,13 @@ cp .env.example .env
    [console.groq.com/docs/models](https://console.groq.com/docs/models) (or call
    `client.models.list()`) for a model your account can access, then set
    `GROQ_MODEL` accordingly — no code change needed.
+5. `src/groq_client.py` requests `reasoning_effort="low"` on models that support
+   it (e.g. `openai/gpt-oss-20b`), retrying automatically without it if the
+   model rejects the parameter. This exists because reasoning models can spend
+   most of a token budget on hidden chain-of-thought and silently truncate a
+   longer plan before it reaches the closing safety disclaimer — if you swap in
+   a different model and see cut-off plans, check `MAX_OUTPUT_TOKENS` in that
+   file against your account's tokens-per-minute limit.
 
 ## 7. How to Run
 
@@ -110,6 +123,8 @@ produces a friendly error rather than a crash.
 - Limitations: *(leave blank)*
 
 ## 9. Example Output (abridged)
+
+![Workout Plan Generator input form](screens/Screenshot%202026-08-20%20135628.png)
 
 ```markdown
 # Weekly Workout Plan
